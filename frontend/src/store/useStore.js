@@ -41,6 +41,13 @@ export const DEF = {
   // server pull, backup import) still falls back to the `showRir` boolean this replaced and
   // keeps the column it had. See effortOf.
   reminder: { on: false, time: '08:00', tz: null }, effort: null, autoBackup: false,
+  // Daily step count, modeled on bodyweight above — one { d, n, t } entry per calendar date
+  // (lib/steps.js), plus the goal that draws the same goal-line on its chart (Settings). Not
+  // training data: never read by progression, recovery or muscles.js.
+  steps: [], stepGoal: 10000,
+  // User-defined supplement list (Settings, lib/supplements.js) and which of them are checked
+  // off on a given date. { [iso]: [supplementId, …] }. No stock library, no reminders.
+  supplements: [], supplementLog: {},
   // Equipment profiles (issue: filter Library/picker/routines by what you actually own —
   // e.g. "Home" vs "Gym" — building on the session-only equipment filter from issue #6).
   equipProfiles: [], activeEquipId: null, equipFilterOn: false,

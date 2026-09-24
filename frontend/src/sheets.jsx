@@ -37,6 +37,8 @@ import { isFav, toggleFav, sortFavouritesFirst } from './lib/favourites.js'
 import { buildSessionEntries } from './lib/session-start.js'
 import { buildCombinedEntries, deriveSessionName } from './lib/session-merge.js'
 import { workoutsOn, backfillStart, backfillEnd, completeBackfill } from './lib/backfill.js'
+import { stepsOn, logSteps, removeSteps } from './lib/steps.js'
+import { newSupplement } from './lib/supplements.js'
 
 const S = () => useStore.getState().S
 const update = (...a) => useStore.getState().update(...a)
@@ -572,6 +574,119 @@ function GoalSheet({ close }) {
   </>
 }
 export const goalSheet = () => ui().openSheet(close => <GoalSheet close={close} />)
+
+/* ============================ steps ============================ */
+// Same shape as body weight above, one calendar date at a time: a big number, a couple of
+// quick-adjust chips, recent entries editable/deletable underneath.
+function StepsSheet({ close }) {
+  const st = useStore(s => s.S)
+  const today = todayISO()
+  const todayEntry = stepsOn(st, today)
+  const [v, setV] = useState(todayEntry ? todayEntry.n : 0)
+  const save = () => {
+    const n = Math.max(0, Math.round(v || 0))
+    update(s => { s.steps = logSteps(s.steps, today, n) })
+    close()
+    toast(t('Steps saved'))
+  }
+  const recent = [...st.steps].reverse().slice(0, 3)
+  const delEntry = d => update(s => { s.steps = removeSteps(s.steps, d) })
+  return <>
+    <h3>{t('Log steps')}</h3>
+    <div className="muted small">{t('Today') + ', ' + fmtDate(today, true)}</div>
+    <div className="bwstep">
+      <button className="bw-pm" onClick={() => setV(x => Math.max(0, (x || 0) - 500))} aria-label="minus 500"><Icon name="minus" /></button>
+      <label className="bw-read">
+        <NumberField fit decimal={false} value={v} onChange={setV} aria-label={t('Steps')} enterKeyHint="done"
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
+      </label>
+      <button className="bw-pm" onClick={() => setV(x => (x || 0) + 500)} aria-label="plus 500"><Icon name="plus" /></button>
+    </div>
+    <div className="chips" style={{ justifyContent: 'center', margin: '8px 0' }}>
+      <button className="chip" onClick={() => setV(x => Math.max(0, (x || 0) - 1000))}>−1000</button>
+      <button className="chip" onClick={() => setV(x => Math.max(0, (x || 0) - 100))}>−100</button>
+      <button className="chip" onClick={() => setV(x => (x || 0) + 100)}>+100</button>
+      <button className="chip" onClick={() => setV(x => (x || 0) + 1000)}>+1000</button>
+    </div>
+    <div style={{ height: 14 }} />
+    <Button variant="primary" onClick={save}>{t('Save')}</Button>
+    {recent.length > 0 && <>
+      <h4 className="sec">{t('Recent entries')}</h4>
+      <div className="list" style={{ gap: 0 }}>
+        {recent.map(e => <div key={e.d} className="row between" style={{ padding: '9px 2px', borderBottom: '1px solid var(--sep)' }}>
+          <span className="small muted">{fmtDate(e.d, true)}</span>
+          <span className="row" style={{ gap: 12 }}><b>{fmtNum(e.n)}</b>
+            <button className="iconbtn" style={{ width: 32, height: 30, borderRadius: 8, fontSize: 15, color: 'var(--red)' }} onClick={() => delEntry(e.d)} aria-label="delete"><Icon name="trash" /></button></span>
+        </div>)}
+      </div>
+    </>}
+  </>
+}
+export const stepsSheet = () => ui().openSheet(close => <StepsSheet close={close} />)
+
+function StepGoalSheet({ close }) {
+  const st = useStore(s => s.S)
+  const [v, setV] = useState(st.stepGoal || 10000)
+  return <>
+    <h3>{t('Daily step goal')}</h3>
+    <div className="muted small">{t('Drawn as a line through the steps chart, same as the body weight goal.')}</div>
+    <div className="bwstep">
+      <label className="bw-read">
+        <NumberField fit decimal={false} value={v} onChange={setV} aria-label={t('Steps')} enterKeyHint="done"
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
+      </label>
+    </div>
+    <div style={{ height: 14 }} />
+    <Button variant="primary" onClick={() => {
+      const n = Math.max(0, Math.round(v || 0))
+      update(s => { s.stepGoal = n || 10000 }); close()
+      toast(t('Goal set: {0}', fmtNum(n || 10000)))
+    }}>{t('Save goal')}</Button>
+  </>
+}
+export const stepGoalSheet = () => ui().openSheet(close => <StepGoalSheet close={close} />)
+
+/* ============================ supplements ============================ */
+// Settings' add/edit sheet — name, optional dose, optional "when", same shape as
+// EquipmentProfileSheet below (a fresh sheet with no `supp` argument adds one).
+function SupplementSheet({ supp, close }) {
+  const nameRef = useRef(null)
+  const doseRef = useRef(null)
+  const whenRef = useRef(null)
+  const save = () => {
+    const name = (nameRef.current.value || '').trim()
+    if (!name) return
+    const dose = (doseRef.current.value || '').trim()
+    const when = (whenRef.current.value || '').trim()
+    update(s => {
+      s.supplements = s.supplements || []
+      if (supp) {
+        const x = s.supplements.find(x => x.id === supp.id)
+        if (x) { x.name = name; x.dose = dose; x.when = when }
+      } else {
+        s.supplements.push(newSupplement(name, dose, when))
+      }
+    })
+    close()
+  }
+  const remove = () => confirmSheet({
+    title: t('Remove this supplement?'),
+    confirmText: t('Remove'), danger: true,
+    onConfirm: () => { update(s => { s.supplements = (s.supplements || []).filter(x => x.id !== supp.id) }); close() }
+  })
+  return <>
+    <h3>{supp ? t('Edit supplement') : t('Add supplement')}</h3>
+    <TextField ref={nameRef} defaultValue={supp?.name || ''} placeholder={t('Name')} maxLength={40} />
+    <div style={{ height: 8 }} />
+    <TextField ref={doseRef} defaultValue={supp?.dose || ''} placeholder={t('Dose (optional)')} maxLength={30} />
+    <div style={{ height: 8 }} />
+    <TextField ref={whenRef} defaultValue={supp?.when || ''} placeholder={t('When (optional)')} maxLength={30} />
+    <div style={{ height: 14 }} />
+    <Button variant="primary" onClick={save}>{t('Save')}</Button>
+    {supp && <><div style={{ height: 8 }} /><Button variant="danger" onClick={remove}>{t('Remove')}</Button></>}
+  </>
+}
+export const supplementSheet = supp => ui().openSheet(close => <SupplementSheet supp={supp} close={close} />)
 
 /* ============================ bar weight ============================ */
 // One editor for every place the bar weight shows up (exercise detail, exercise config,
