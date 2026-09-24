@@ -39,6 +39,7 @@ import { buildCombinedEntries, deriveSessionName } from './lib/session-merge.js'
 import { workoutsOn, backfillStart, backfillEnd, completeBackfill } from './lib/backfill.js'
 import { stepsOn, logSteps, removeSteps } from './lib/steps.js'
 import { newSupplement } from './lib/supplements.js'
+import { newMobilityItem, mobilityOf, combinedMobility } from './lib/mobility.js'
 
 const S = () => useStore.getState().S
 const update = (...a) => useStore.getState().update(...a)
@@ -687,6 +688,57 @@ function SupplementSheet({ supp, close }) {
   </>
 }
 export const supplementSheet = supp => ui().openSheet(close => <SupplementSheet supp={supp} close={close} />)
+
+/* ============================ warm-up / cool-down (lib/mobility.js) ============================ */
+// Add/edit one item on a routine's warm-up or cool-down list — plain text the user types
+// (name, an optional duration-or-reps note, an optional extra note). Deliberately not the
+// exercise picker: these never become exercises. `kind` is 'warmup' | 'cooldown'.
+function MobilityItemSheet({ kind, routineId, item, close }) {
+  const nameRef = useRef(null)
+  const amountRef = useRef(null)
+  const noteRef = useRef(null)
+  const save = () => {
+    const name = (nameRef.current.value || '').trim()
+    if (!name) return
+    const amount = (amountRef.current.value || '').trim()
+    const note = (noteRef.current.value || '').trim()
+    update(s => {
+      const r = s.routines.find(x => x.id === routineId)
+      if (!r) return
+      r[kind] = mobilityOf(r, kind)
+      if (item) {
+        const x = r[kind].find(x => x.id === item.id)
+        if (x) { x.name = name; x.amount = amount; x.note = note }
+      } else {
+        r[kind].push(newMobilityItem(name, amount, note))
+      }
+    })
+    close()
+  }
+  const remove = () => confirmSheet({
+    title: t('Remove this item?'), confirmText: t('Remove'), danger: true,
+    onConfirm: () => {
+      update(s => {
+        const r = s.routines.find(x => x.id === routineId)
+        if (r) r[kind] = mobilityOf(r, kind).filter(x => x.id !== item.id)
+      })
+      close()
+    }
+  })
+  const isWarmup = kind === 'warmup'
+  return <>
+    <h3>{item ? (isWarmup ? t('Edit warm-up item') : t('Edit cool-down item')) : (isWarmup ? t('Add warm-up item') : t('Add cool-down item'))}</h3>
+    <TextField ref={nameRef} defaultValue={item?.name || ''} placeholder={t('Name — e.g. "Arm circles"')} maxLength={40} />
+    <div style={{ height: 8 }} />
+    <TextField ref={amountRef} defaultValue={item?.amount || ''} placeholder={t('Duration or reps (optional) — e.g. "15 each direction"')} maxLength={30} />
+    <div style={{ height: 8 }} />
+    <TextField ref={noteRef} defaultValue={item?.note || ''} placeholder={t('Note (optional)')} maxLength={60} />
+    <div style={{ height: 14 }} />
+    <Button variant="primary" onClick={save}>{t('Save')}</Button>
+    {item && <><div style={{ height: 8 }} /><Button variant="danger" onClick={remove}>{t('Remove')}</Button></>}
+  </>
+}
+export const mobilityItemSheet = (kind, routineId, item) => ui().openSheet(close => <MobilityItemSheet kind={kind} routineId={routineId} item={item} close={close} />)
 
 /* ============================ bar weight ============================ */
 // One editor for every place the bar weight shows up (exercise detail, exercise config,
@@ -1925,6 +1977,11 @@ export function startFlow(routineIds) {
 export function beginWorkout(routineIds, bw) {
   const st = S()
   const { entries, routineIds: rids, routines } = buildCombinedEntries(st, routineIds)
+  // The mobility lists (lib/mobility.js) across every combined routine, resolved once here —
+  // the guided workout only ever reads them off s.active, never back through routineIds, so a
+  // routine edited or deleted mid-session can't change what this session is already showing.
+  const warmup = combinedMobility(routines, 'warmup')
+  const cooldown = combinedMobility(routines, 'cooldown')
   update(s => {
     s.active = {
       id: uid(), d: todayISO(), start: Date.now(),
@@ -1936,6 +1993,12 @@ export function beginWorkout(routineIds, bw) {
       // Snapshot the layout at start so the header ⋮ can change it for this session only —
       // changing the saved default (Settings → Workout view) mid-session leaves it alone.
       workoutView: st.workoutView || 'cards',
+      // Mobility screens: `phase` gates which one Workout.jsx shows instead of the normal
+      // exercise flow — 'warmup' first (if the combined list is non-empty), then the exercises
+      // (implicit — anything other than 'warmup'/'cooldown' reads as the normal flow), then
+      // 'cooldown' at finish (see finishWorkout below). Never touches entries/sets.
+      ...(warmup.length ? { warmup, phase: 'warmup' } : {}),
+      ...(cooldown.length ? { cooldown } : {}),
     }
   })
   useUI.getState().stopRest()
@@ -2039,6 +2102,10 @@ function AddRoutineToSession({ close }) {
       if (!s.active.customName) {
         s.active.name = deriveSessionName(s.active.routineIds.map(id => s.routines.find(x => x.id === id)?.name).filter(Boolean))
       }
+      // The warm-up screen is already behind you by the time you can reach this sheet, but
+      // cool-down still comes — fold the added routine's list in so it is not lost.
+      const addedCooldown = mobilityOf(r, 'cooldown')
+      if (addedCooldown.length) s.active.cooldown = [...(s.active.cooldown || []), ...addedCooldown]
     })
     close()
     toast(t('{0} added — {1}', r.name, exCount(r.ex.length)))
@@ -2296,8 +2363,18 @@ export function finishWorkout() {
   if (!A) return
   const done = setsDoneActive(A)
   const total = setUnitsTotal(A.entries)
-  if (!done) { confirmSheet({ title: t('Nothing logged yet'), message: t('You haven’t checked off any sets. Finish the workout anyway?'), confirmText: t('Finish anyway'), onConfirm: doFinishWorkout }); return }
-  if (done < total) { confirmSheet({ title: t('Finish early?'), message: t(total - done === 1 ? '{0} set still unchecked. Finish the workout now?' : '{0} sets still unchecked. Finish the workout now?', total - done), confirmText: t('Finish workout'), onConfirm: doFinishWorkout }); return }
+  if (!done) { confirmSheet({ title: t('Nothing logged yet'), message: t('You haven’t checked off any sets. Finish the workout anyway?'), confirmText: t('Finish anyway'), onConfirm: afterSetsConfirmed }); return }
+  if (done < total) { confirmSheet({ title: t('Finish early?'), message: t(total - done === 1 ? '{0} set still unchecked. Finish the workout now?' : '{0} sets still unchecked. Finish the workout now?', total - done), confirmText: t('Finish workout'), onConfirm: afterSetsConfirmed }); return }
+  afterSetsConfirmed()
+}
+// Reached once the set-completion question above is settled (or never needed asking). A
+// non-empty cool-down that hasn't been shown yet gets one screen before the workout actually
+// ends — Workout.jsx renders it while `active.phase === 'cooldown'`, and its own Finish/Skip
+// buttons call finishWorkout() again, which lands straight back here and falls through.
+function afterSetsConfirmed() {
+  const A = S().active
+  if (!A) return
+  if ((A.cooldown || []).length && A.phase !== 'cooldown') { update(s => { s.active.phase = 'cooldown' }); return }
   doFinishWorkout()
 }
 function doFinishWorkout() {

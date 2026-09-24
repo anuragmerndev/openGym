@@ -15,6 +15,7 @@ import { uid, todayISO, DAYN, weekOrder, weekStartOf, fmtNum, exCount } from './
 import { t, exerciseNameFor } from './i18n-core.js'
 import { convertWeight } from './units.js'
 import { MUSCLES, inMuscleOrder } from './muscles.js'
+import { mobilityOf, sanitizeMobilityList } from './mobility.js'
 
 const PLAN_FMT = 1
 const WEEK_DAYS = [1, 2, 3, 4, 5, 6, 0]   // every getDay() index; only the reader's own
@@ -168,7 +169,12 @@ export function buildPlanBundle(S, name) {
     id: r.id, name: r.name, emoji: r.emoji,
     ...(r.prog ? { prog: r.prog } : {}),
     ...(r.excludeFromProgression === true ? { excludeFromProgression: true } : {}),
-    ex: (r.ex || []).map(cleanEx)
+    ex: (r.ex || []).map(cleanEx),
+    // Warm-up/cool-down (lib/mobility.js) travel with the routine, same optional-if-present
+    // shape as prog/excludeFromProgression: a routine with neither list omits both keys, so a
+    // file written before this feature existed round-trips unchanged.
+    ...(mobilityOf(r, 'warmup').length ? { warmup: mobilityOf(r, 'warmup') } : {}),
+    ...(mobilityOf(r, 'cooldown').length ? { cooldown: mobilityOf(r, 'cooldown') } : {}),
   }))
   const usedIds = new Set(routines.flatMap(r => r.ex.map(e => e.id)))
   const customEx = (S.customEx || [])
@@ -201,23 +207,34 @@ export function parsePlan(raw, destinationUnit = 'kg') {
   const customEx = (Array.isArray(data.customEx) ? data.customEx : []).filter(c => c && c.id)
   const known = new Set(customEx.map(c => c.id))
   let dropped = 0
-  const routines = data.routines.filter(r => r && Array.isArray(r.ex)).map(r => ({
-    ...r,
-    ex: r.ex.filter(e => {
-      const ok = !!e && (known.has(e.id) || !!EXIDX[e.id])
-      if (!ok) dropped++
-      return ok
-    }).map(e => {
-      // The exercises pass through as written, so the fields that carry numbers into the
-      // planner get the same clamps on the way in that they get on the way out.
-      const warm = cleanWarmupSets(e.warmupSets)
-      const intens = cleanIntensifier(e.intensifier)
-      const rest = cleanRestSec(e.restSec)
-      const warmRest = cleanRestSec(e.warmupRestSec)
-      const { warmupSets, intensifier, restSec, warmupRestSec, ...passthrough } = e
-      return convertedExercise({ ...passthrough, ...(warm ? { warmupSets: warm } : {}), ...(intens ? { intensifier: intens } : {}), ...(rest ? { restSec: rest } : {}), ...(warmRest ? { warmupRestSec: warmRest } : {}) }, sourceUnit || destination, destination)
-    })
-  }))
+  const routines = data.routines.filter(r => r && Array.isArray(r.ex)).map(r => {
+    // A hand-edited or foreign file's warm-up/cool-down is untrusted shape, not just untrusted
+    // numbers — sanitizeMobilityList keeps only plausibly-shaped items so a routine here can
+    // never hand RoutineEdit/Workout something they don't already guard against. Omitted (not
+    // written as []) when there is nothing left, matching how every other optional field here
+    // round-trips a file that never had it.
+    const warmup = sanitizeMobilityList(r.warmup)
+    const cooldown = sanitizeMobilityList(r.cooldown)
+    return {
+      ...r,
+      ex: r.ex.filter(e => {
+        const ok = !!e && (known.has(e.id) || !!EXIDX[e.id])
+        if (!ok) dropped++
+        return ok
+      }).map(e => {
+        // The exercises pass through as written, so the fields that carry numbers into the
+        // planner get the same clamps on the way in that they get on the way out.
+        const warm = cleanWarmupSets(e.warmupSets)
+        const intens = cleanIntensifier(e.intensifier)
+        const rest = cleanRestSec(e.restSec)
+        const warmRest = cleanRestSec(e.warmupRestSec)
+        const { warmupSets, intensifier, restSec, warmupRestSec, ...passthrough } = e
+        return convertedExercise({ ...passthrough, ...(warm ? { warmupSets: warm } : {}), ...(intens ? { intensifier: intens } : {}), ...(rest ? { restSec: rest } : {}), ...(warmRest ? { warmupRestSec: warmRest } : {}) }, sourceUnit || destination, destination)
+      }),
+      warmup: warmup.length ? warmup : undefined,
+      cooldown: cooldown.length ? cooldown : undefined,
+    }
+  })
   return {
     name: (data.name || '').trim(),
     routines,
@@ -268,6 +285,8 @@ export function mergePlan(s, bundle, { schedule } = {}) {
       emoji: r.emoji,
       ...(r.prog ? { prog: r.prog } : {}),
       ...(r.excludeFromProgression === true ? { excludeFromProgression: true } : {}),
+      ...(mobilityOf(r, 'warmup').length ? { warmup: mobilityOf(r, 'warmup') } : {}),
+      ...(mobilityOf(r, 'cooldown').length ? { cooldown: mobilityOf(r, 'cooldown') } : {}),
       ex: (r.ex || []).map(e => ({ ...e, id: exIdMap[e.id] || e.id }))
     })
   })
