@@ -4,7 +4,9 @@ import { useStore } from '../store/useStore.js'
 import { effectiveRoutines, effectiveRoutineIds, nextTrainingDay, streakWeeks, lastBW, setsDoneActive } from '../lib/history.js'
 import { fmtNum, fmtDate, todayISO, isoOf, weekKey, weekStartOf, weekDayOffset, DAYS, DAYN } from '../lib/format.js'
 import { t, dateLocale } from '../lib/i18n.js'
-import { bwSheet, goalSheet, dayOverrideSheet, calendarSheet, startFlow, starterPlanSheet, bwDeltaColor } from '../sheets.jsx'
+import { bwSheet, goalSheet, dayOverrideSheet, calendarSheet, startFlow, starterPlanSheet, bwDeltaColor, stepsSheet, stepGoalSheet } from '../sheets.jsx'
+import { stepsOn } from '../lib/steps.js'
+import { supplementsFor, toggleSupplement } from '../lib/supplements.js'
 import LineChart from '../components/LineChart.jsx'
 import Icon from '../components/Icon.jsx'
 import { Button } from '../components/ui.jsx'
@@ -16,6 +18,7 @@ export default function Home() {
   const nav = useNavigate()
   const S = useStore(s => s.S)
   const user = useStore(s => s.user)
+  const { update } = useStore()
   const [weekOffset, setWeekOffset] = useState(0)
 
   const today = new Date()
@@ -56,6 +59,16 @@ export default function Home() {
   // Days scheduled, not routines — a combined day counts as 1, matching wThisWeek (one w).
   const plannedPerWeek = Object.values(S.week).filter(ids => ids?.length).length
   const bwPoints = S.bodyweight.slice(-30).map(b => ({ t: b.t || new Date(b.d).getTime(), y: b.w, d: b.d }))
+
+  const todaySteps = stepsOn(S, todayISO())
+  const stepsGoalReached = !!(todaySteps && todaySteps.n >= (S.stepGoal || 10000))
+  const stepPoints = (S.steps || []).slice(-30).map(e => ({ t: e.t || new Date(e.d).getTime(), y: e.n, d: e.d }))
+  const todaySupplements = supplementsFor(S, todayISO())
+  const toggleSupp = id => update(s => {
+    const iso = todayISO()
+    s.supplementLog = s.supplementLog || {}
+    s.supplementLog[iso] = toggleSupplement(s.supplementLog[iso], id)
+  })
 
   // today's session shown right under the week strip
   const onToday = () => { if (S.active) nav('/workout'); else if (todayRoutines.length) startFlow(effectiveRoutineIds(S, todayISO())); else dayOverrideSheet(todayISO()) }
@@ -170,6 +183,42 @@ export default function Home() {
         ? t('No entries yet — log your weight to start the curve.')
         : t("No entries yet — log your weight to start the curve. It's also asked before every workout.")}</div>}
     </div>
+
+    <div className="card">
+      <div className="row between bw-head" style={{ marginBottom: 6 }}>
+        <h2 style={{ margin: 0 }}>{t('Steps')}</h2>
+        <div className="row" style={{ gap: 8 }}>
+          <Button size="sm" icon="target" onClick={stepGoalSheet}>{fmtNum(S.stepGoal || 10000)}</Button>
+          <Button size="sm" icon="plus" onClick={() => stepsSheet()}>{t('Log')}</Button>
+        </div>
+      </div>
+      {todaySteps ? <>
+        <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+          <div className="big">{fmtNum(todaySteps.n)}</div>
+          <span className="dim small" style={{ marginLeft: 'auto' }}>{fmtDate(todaySteps.d, true)}</span>
+        </div>
+        <div className="small row" style={{ color: stepsGoalReached ? 'var(--green)' : 'var(--label-2)', marginTop: 4, gap: 5 }}>
+          <Icon name="target" style={{ fontSize: 13 }} />
+          <span>{t('Goal')} {fmtNum(S.stepGoal || 10000)} {stepsGoalReached ? t('reached!') : t('{0} to go', fmtNum(Math.max(0, (S.stepGoal || 10000) - todaySteps.n)))}</span>
+        </div>
+        <div className="chart" style={{ marginTop: 8 }}><LineChart points={stepPoints} h={130} goal={S.stepGoal || 10000} /></div>
+      </> : <div className="muted small">{t('No entries yet — log today’s steps to start the curve.')}</div>}
+    </div>
+
+    {(S.supplements || []).length > 0 && <div className="card">
+      <h2 style={{ marginBottom: 8 }}>{t('Supplements')}</h2>
+      <div className="list" style={{ gap: 0 }}>
+        {todaySupplements.map(sp => <div key={sp.id} className="row" style={{ gap: 10, padding: '9px 2px', borderBottom: '1px solid var(--sep)' }} {...tappable(() => toggleSupp(sp.id))}>
+          <button className="iconbtn" style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, background: sp.done ? 'var(--green)' : 'var(--surface-3)', color: sp.done ? '#fff' : 'transparent' }} aria-label={sp.done ? t('Done') : t('Not done')}>
+            <Icon name="check" style={{ fontSize: 14 }} />
+          </button>
+          <div style={{ minWidth: 0 }}>
+            <div className={sp.done ? 'muted' : undefined} style={sp.done ? { textDecoration: 'line-through' } : undefined}>{sp.name}</div>
+            {(sp.dose || sp.when) && <div className="ss">{[sp.dose, sp.when].filter(Boolean).join(' · ')}</div>}
+          </div>
+        </div>)}
+      </div>
+    </div>}
 
     <div className="card tappable" style={{ cursor: 'pointer' }} {...tappable(() => calendarSheet())}>
       <div className="row between">

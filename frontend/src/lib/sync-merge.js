@@ -10,7 +10,10 @@
  *   - scalars and settings, `week`, `dayPlan`, `wc`, `reminder`, …: from the copy with the newer `_ts`
  *   - workouts, routines, customEx, equipProfiles, gymCards: union by id, the newer copy's version
  *     of an id that both have; workouts sorted by day and start like every other writer
- *   - bodyweight: union by day, the later-edited (`t`) entry of a day that both have
+ *   - bodyweight, steps: union by day, the later-edited (`t`) entry of a day that both have
+ *   - supplements: union by id, like routines/customEx; supplementLog: date union, each date's
+ *     checked ids unioned (so, like bodyweight/steps, a day never loses an entry — but the
+ *     same known limit applies: unchecking one on one device can come back from the other)
  *   - favEx: ordered set union, the newer copy first
  *   - exWeights: union by exercise, the better `w` for that exercise — larger for an ordinary
  *     lift, smaller on an assistance machine (a PR logged on the other device must not be
@@ -50,7 +53,8 @@ export function unionById(newer = [], older = [], key = x => x?.id) {
 const workoutKey = w => (w?.id != null ? w.id : `${w?.d}|${w?.start}`)
 const byDayStart = (a, b) => (a.d === b.d ? (a.start || 0) - (b.start || 0) : a.d < b.d ? -1 : 1)
 
-/** One entry per day; where both have a day, the one edited later (`t`); sorted by day. */
+/** One entry per day; where both have a day, the one edited later (`t`); sorted by day. Used
+ *  for bodyweight and, identically, for steps — both are a single dated { d, t, … } reading. */
 export function mergeBodyweight(a = [], b = []) {
   const byDay = new Map()
   for (const e of [...list(a), ...list(b)]) {
@@ -59,6 +63,15 @@ export function mergeBodyweight(a = [], b = []) {
     if (!cur || (e.t || 0) > (cur.t || 0)) byDay.set(e.d, e)
   }
   return [...byDay.values()].sort((x, y) => (x.d < y.d ? -1 : 1))
+}
+
+// Each date's checked supplement ids, unioned — a date present on only one side is kept as is.
+function mergeSupplementLog(n = {}, o = {}) {
+  const out = {}
+  for (const d of new Set([...Object.keys(n || {}), ...Object.keys(o || {})])) {
+    out[d] = [...new Set([...(n?.[d] || []), ...(o?.[d] || [])])]
+  }
+  return out
 }
 
 // The kept load per exercise. "The larger one wins" held while the app only ever raised it —
@@ -85,10 +98,14 @@ export function mergeStates(a, b, { prefer } = {}) {
   const o = n === a ? b : a
   const out = clone(n)
   out.workouts = unionById(n.workouts, o.workouts, workoutKey).map(clone).sort(byDayStart)
-  for (const f of ['routines', 'customEx', 'equipProfiles', 'gymCards']) {
+  for (const f of ['routines', 'customEx', 'equipProfiles', 'gymCards', 'supplements']) {
     if (list(n[f]).length || list(o[f]).length) out[f] = unionById(n[f], o[f]).map(clone)
   }
   out.bodyweight = mergeBodyweight(n.bodyweight, o.bodyweight).map(clone)
+  out.steps = mergeBodyweight(n.steps, o.steps).map(clone)
+  if (Object.keys(n.supplementLog || {}).length || Object.keys(o.supplementLog || {}).length) {
+    out.supplementLog = mergeSupplementLog(n.supplementLog, o.supplementLog)
+  }
   if (list(n.favEx).length || list(o.favEx).length) out.favEx = [...new Set([...list(n.favEx), ...list(o.favEx)])]
   out.exWeights = clone(mergeExWeights(n.exWeights, o.exWeights))
   for (const f of ['exNotes', 'barWeights']) {

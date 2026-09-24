@@ -16,9 +16,10 @@ import { MOBILE, isAndroid, shareExport, syncReminder } from '../lib/mobile.js'
 import { checkForUpdate, downloadAndInstall } from '../lib/update.js'
 import { forgetCoach } from '../lib/coach-api.js'
 import { ConnectSheet } from './MobileOnboarding.jsx'
-import { starterPlanSheet, confirmSheet, importFromApp, importFromHevy, equipmentProfileSheet, menuSheet, askAddDeviceData } from '../sheets.jsx'
+import { starterPlanSheet, confirmSheet, importFromApp, importFromHevy, equipmentProfileSheet, menuSheet, askAddDeviceData, supplementSheet } from '../sheets.jsx'
+import { moveSupplement } from '../lib/supplements.js'
 import Icon from '../components/Icon.jsx'
-import { Section, Row, SelectRow, Switch, Segmented, Button, TextField } from '../components/ui.jsx'
+import { Section, Row, SelectRow, Switch, Segmented, Button, TextField, NumberField } from '../components/ui.jsx'
 
 export default function Settings() {
   const nav = useNavigate()
@@ -265,6 +266,10 @@ export default function Settings() {
         subtitle={t('Show a card on Home with your membership QR codes.')}>
         <Switch checked={S.checkIn !== false} onChange={v => update(s => { s.checkIn = v })} />
       </Row>
+      {/* Drawn as a goal line on the Home/Stats steps chart, same as the body weight goal. */}
+      <Row icon="figureRun" iconTint="var(--green)" title={t('Daily step goal')}>
+        <NumberField decimal={false} fit value={S.stepGoal || 10000} onChange={v => update(s => { s.stepGoal = v || 10000 })} aria-label={t('Daily step goal')} />
+      </Row>
     </Section>
 
     {/* ---------- during a workout ---------- */}
@@ -346,6 +351,9 @@ export default function Settings() {
 
     {/* ---------- equipment ---------- */}
     <EquipmentCard S={S} update={update} />
+
+    {/* ---------- supplements ---------- */}
+    <SupplementsCard S={S} update={update} />
 
     {/* ---------- appearance ---------- */}
     <Section title={t('Appearance')} footer={DEMO || MOBILE ? undefined : t('synced with your profile')}>
@@ -657,6 +665,33 @@ function EquipmentCard({ S, update }) {
       </Row>
     ))}
     <Row icon="plus" iconTint="var(--acc)" title={t('Add equipment profile')} accessory="chevron" onClick={() => equipmentProfileSheet(null)} />
+  </Section>
+}
+
+// The supplement list shown on Home (name, optional dose, optional "when" — see
+// lib/supplements.js). ◀ ▶ reorder buttons rather than drag, same reasoning as CheckIn's gym
+// cards: reliable, and doesn't fight the list's vertical scroll.
+function SupplementsCard({ S, update }) {
+  const list = S.supplements || []
+  const move = (i, to) => update(s => { s.supplements = moveSupplement(s.supplements || [], i, to) })
+  const remove = sp => confirmSheet({
+    title: t('Remove this supplement?'), message: sp.name,
+    confirmText: t('Remove'), danger: true,
+    onConfirm: () => update(s => { s.supplements = (s.supplements || []).filter(x => x.id !== sp.id) }),
+  })
+  return <Section title={t('Supplements')} footer={t('Shown on Home as a daily checklist. No stock library, no reminders — just what you type in here.')}>
+    {list.map((sp, i) => (
+      <Row key={sp.id} icon="clipboard" iconTint="var(--pink)" title={sp.name}
+        subtitle={[sp.dose, sp.when].filter(Boolean).join(' · ') || undefined}
+        accessory="chevron" onClick={() => supplementSheet(sp)}>
+        {list.length > 1 && <div className="row" style={{ gap: 2 }}>
+          <button className="iconbtn" onClick={ev => { ev.stopPropagation(); move(i, i - 1) }} disabled={i === 0} aria-label={t('Move up')}><Icon name="chevronUp" /></button>
+          <button className="iconbtn" onClick={ev => { ev.stopPropagation(); move(i, i + 1) }} disabled={i === list.length - 1} aria-label={t('Move down')}><Icon name="chevronDown" /></button>
+        </div>}
+        <button className="iconbtn" aria-label={t('Delete')} onClick={ev => { ev.stopPropagation(); remove(sp) }}><Icon name="trash" /></button>
+      </Row>
+    ))}
+    <Row icon="plus" iconTint="var(--acc)" title={t('Add supplement')} accessory="chevron" onClick={() => supplementSheet(null)} />
   </Section>
 }
 

@@ -35,6 +35,7 @@ vi.mock('../sheets.jsx', () => ({
   bwSheet: () => {}, goalSheet: () => {}, calendarSheet: () => {}, workoutDetailSheet: () => {},
   exerciseHistorySheet: mocks.exerciseHistorySheet,
   WorkoutRow: () => React.createElement('div'), bwDeltaColor: () => 'inherit',
+  stepsSheet: () => {}, stepGoalSheet: () => {},
 }))
 vi.mock('../components/LineChart.jsx', () => ({ default: () => React.createElement('div') }))
 vi.mock('../components/Heatmap.jsx', () => ({ default: () => React.createElement('div') }))

@@ -5,7 +5,7 @@ import { EXIDX, matchExercise, betterWeight } from '../lib/exercises.js'
 import { lastBW, streakWeeks, setLabel, modeOf, effortOf, metricModeForEntry, metricRowsForEntry, bestWeightForEntry } from '../lib/history.js'
 import { fmtNum, fmtDate, fmtVol, todayISO, weekStartOf } from '../lib/format.js'
 import { t, exerciseNameFor, getLang } from '../lib/i18n.js'
-import { bwSheet, goalSheet, calendarSheet, workoutDetailSheet, exerciseHistorySheet, WorkoutRow, bwDeltaColor } from '../sheets.jsx'
+import { bwSheet, goalSheet, calendarSheet, workoutDetailSheet, exerciseHistorySheet, WorkoutRow, bwDeltaColor, stepsSheet, stepGoalSheet } from '../sheets.jsx'
 import LineChart from '../components/LineChart.jsx'
 import Heatmap from '../components/Heatmap.jsx'
 import Icon from '../components/Icon.jsx'
@@ -298,6 +298,9 @@ export default function Stats() {
     .map(b => ({ t: b.t || new Date(b.d).getTime(), y: b.w, d: b.d }))
   const bw30 = S.bodyweight.filter(b => (b.t || new Date(b.d).getTime()) > now - 30 * 86400000)
   const bwDelta30 = bw30.length > 1 ? bw30[bw30.length - 1].w - bw30[0].w : null
+
+  const stepPts = (S.steps || []).filter(e => range === 0 || (e.t || new Date(e.d).getTime()) > now - range * 86400000)
+    .map(e => ({ t: e.t || new Date(e.d).getTime(), y: e.n, d: e.d }))
   const workouts = S.workouts
   const monthW = workouts.filter(w => String(w.d || '').slice(0, 7) === todayISO().slice(0, 7)).length
 
@@ -465,6 +468,19 @@ export default function Stats() {
         <Segmented className="seg-range" value={range} onChange={setRange}
           options={[{ value: 30, label: '1M' }, { value: 90, label: '3M' }, { value: 365, label: '1Y' }, { value: 0, label: t('All') }]} />
         <div className="chart"><LineChart points={bwPts} h={160} unit={S.unit} goal={S.targetW} /></div>
+      </div>
+
+      <div className="card">
+        <div className="row between bw-head" style={{ marginBottom: 8 }}>
+          <h2 style={{ margin: 0 }}>{t('Steps')}</h2>
+          <div className="row" style={{ gap: 8 }}>
+            <Button size="sm" icon="target" onClick={stepGoalSheet}>{fmtNum(S.stepGoal || 10000)}</Button>
+            <Button size="sm" icon="plus" onClick={() => stepsSheet()}>{t('Log')}</Button>
+          </div>
+        </div>
+        <Segmented className="seg-range" value={range} onChange={setRange}
+          options={[{ value: 30, label: '1M' }, { value: 90, label: '3M' }, { value: 365, label: '1Y' }, { value: 0, label: t('All') }]} />
+        <div className="chart"><LineChart points={stepPts} h={160} goal={S.stepGoal || 10000} /></div>
       </div>
 
       <div className="card">
