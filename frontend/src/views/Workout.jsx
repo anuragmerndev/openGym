@@ -18,6 +18,8 @@ import Icon from '../components/Icon.jsx'
 import { Button, Check, NumberField } from '../components/ui.jsx'
 import { nextPrescription, applyPrescription, defaultIncrement, weightIncrement, stepWeight } from '../lib/progression.js'
 import { progressionGuidance } from '../lib/progression-copy.js'
+import { toggleMobilityItem } from '../lib/mobility.js'
+import { tappable } from '../lib/use-sheet-keyboard.js'
 import { glyphOf } from '../lib/glyphs.js'
 import { isWarmupRow, isDropSet, isRestPauseSet, dropsOf, clustersOf, addDrop, addCluster, removeDropAt, removeClusterAt, setDropAt, setClusterAt, nextDropWeight, nextBurstReps, isSideSet, makeSideSet, setSideField, toggleSide, addSideDrop, removeSideDropAt, setSideDropAt, addSideCluster, removeSideClusterAt, setSideClusterAt } from '../lib/workout-model.js'
 import { canMoveActiveWorkoutUnit, moveActiveWorkoutUnit } from '../lib/active-workout-order.js'
@@ -973,6 +975,11 @@ function ActiveWorkout() {
     }
   }, [])
 
+  // Warm-up before the first exercise, cool-down after the last (lib/mobility.js) — a plain
+  // checklist, entirely outside the set/entries model this component otherwise renders. Every
+  // hook above still ran, so switching the returned JSX here is the only thing this branches.
+  if (A.phase === 'warmup' || A.phase === 'cooldown') return <MobilityScreen A={A} update={update} />
+
   return <div className="narrow">
     {/* In list mode the whole session scrolls under the header, so the header (name, clock,
         set counter, discard/finish, progress) stays pinned — the one thing you want in view
@@ -1131,6 +1138,51 @@ function ActiveWorkout() {
       </button>
     })()}
     <div className="workout-end-spacer" />
+  </div>
+}
+
+// The warm-up/cool-down screen. `A.phase` says which list (set by beginWorkout / finishWorkout
+// in sheets.jsx); this owns nothing of A.entries/A.cur and never writes to either — ticking an
+// item only ever touches A.warmupChecked/A.cooldownChecked, which vanish with the session and
+// never reach the saved workout. Skippable as a whole: both buttons below just move on,
+// checked or not — the checklist is for the person doing it, not a gate the app enforces.
+function MobilityScreen({ A, update }) {
+  const nav = useNavigate()
+  const isWarmup = A.phase === 'warmup'
+  const items = isWarmup ? (A.warmup || []) : (A.cooldown || [])
+  const checkedKey = isWarmup ? 'warmupChecked' : 'cooldownChecked'
+  const checked = new Set(A[checkedKey] || [])
+  const toggle = id => update(s => { if (s.active) s.active[checkedKey] = toggleMobilityItem(s.active[checkedKey] || [], id) })
+  // Warm-up just hands the session to the normal exercise flow; cool-down calls back into
+  // finishWorkout(), which re-enters with phase already 'cooldown' and falls through to
+  // actually ending the workout (see afterSetsConfirmed in sheets.jsx).
+  const advance = () => { if (isWarmup) update(s => { if (s.active) s.active.phase = 'work' }); else finishWorkout() }
+  return <div className="narrow">
+    <div className="hdr">
+      <button className="iconbtn" aria-label={t('Discard')} onClick={() => confirmSheet({
+        title: t('Discard workout?'), message: t('The sets you logged in this session will be lost.'),
+        confirmText: t('Discard'), danger: true,
+        onConfirm: () => { update(s => { s.active = null }); nav('/home') }
+      })}><Icon name="xmark" /></button>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontWeight: 600 }}>{isWarmup ? t('Warm-up') : t('Cool-down')}</div>
+        <div className="sub">{A.name}</div>
+      </div>
+      <div style={{ width: 34, flex: 'none' }} />
+    </div>
+    {items.length ? <div className="list" style={{ marginTop: 10 }}>
+      {items.map(item => <div key={item.id} className="item" {...tappable(() => toggle(item.id))}>
+        <Check checked={checked.has(item.id)} onChange={() => toggle(item.id)} />
+        <div className="grow">
+          <div className="tt" style={checked.has(item.id) ? { textDecoration: 'line-through', color: 'var(--label-2)' } : undefined}>{item.name}</div>
+          {(item.amount || item.note) && <div className="ss">{[item.amount, item.note].filter(Boolean).join(' · ')}</div>}
+        </div>
+      </div>)}
+    </div> : null}
+    <div style={{ height: 16 }} />
+    <Button variant="primary" onClick={advance}>{isWarmup ? t('Start workout') : t('Finish workout')}</Button>
+    <div style={{ height: 8 }} />
+    <Button variant="ghost" className="dim" onClick={advance}>{isWarmup ? t('Skip warm-up') : t('Skip cool-down')}</Button>
   </div>
 }
 

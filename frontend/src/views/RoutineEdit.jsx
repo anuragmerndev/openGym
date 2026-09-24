@@ -8,7 +8,8 @@ import { uid } from '../lib/format.js'
 import { t, exerciseNameFor } from '../lib/i18n.js'
 import { supersetUnits, moveSupersetUnit, cleanupSg, exLine, defaultConfig } from '../lib/history.js'
 import { Thumb } from '../components/Media.jsx'
-import { glyphPicker, exercisePicker, exConfigSheet, confirmSheet } from '../sheets.jsx'
+import { glyphPicker, exercisePicker, exConfigSheet, confirmSheet, mobilityItemSheet } from '../sheets.jsx'
+import { mobilityOf, moveMobilityItem } from '../lib/mobility.js'
 import Icon from '../components/Icon.jsx'
 import { glyphOf } from '../lib/glyphs.js'
 import { Button, Row, SelectRow, Switch } from '../components/ui.jsx'
@@ -381,6 +382,10 @@ export default function RoutineEdit() {
       </div>
     </div>}
 
+    {/* Mobility work around the session — reps/seconds typed in free text, ticked off rather
+        than logged. Deliberately not exercises: no picker, no library, never touches r.ex. */}
+    <MobilitySection r={r} id={id} kind="warmup" update={update} />
+
     {r.ex.length ? <div ref={reorder.listRef} onClickCapture={reorder.onClickCapture}
       className={'list routine-list' + (reorder.drag ? ' is-reordering' : '')}>{r.ex.map((e, i) => {
       // An unresolvable id is shown rather than skipped — hiding it left an entry you
@@ -414,6 +419,8 @@ export default function RoutineEdit() {
       </div>
     })}{reorder.drag && <div className="routine-drop-indicator" data-testid="routine-drop-indicator"
       aria-hidden="true" style={{ top: `${reorder.drag.indicatorTop}px` }} />}</div> : <div className="empty"><div className="ico"><Icon name="dumbbell" /></div>{t('No exercises yet — add your first one.')}</div>}
+
+    <MobilitySection r={r} id={id} kind="cooldown" update={update} />
 
     {/* Coverage of the routine as planned, so a gap shows up while you're building it
         rather than after a month of training around it. */}
@@ -461,5 +468,33 @@ export default function RoutineEdit() {
         nav('/plan')
       }
     })}>{t('Delete routine')}</Button>
+  </div>
+}
+
+// A routine's warm-up or cool-down list (lib/mobility.js) — plain text items the user types,
+// never exercises: no thumb, no picker, no library lookup. ◀ ▶-style reorder buttons rather
+// than drag, same reasoning as CheckIn's gym cards and Settings' supplement list.
+function MobilitySection({ r, id, kind, update }) {
+  const list = mobilityOf(r, kind)
+  const label = kind === 'warmup' ? t('Warm-up') : t('Cool-down')
+  const move = (i, to) => update(s => {
+    const routine = s.routines.find(x => x.id === id)
+    routine[kind] = moveMobilityItem(mobilityOf(routine, kind), i, to)
+  })
+  return <div className="sect-b" style={{ marginBottom: 16 }}>
+    <h2 style={{ fontSize: 15, marginBottom: 6 }}>{label}</h2>
+    {list.map((item, i) => (
+      <Row key={item.id} icon="stretch" iconTint={kind === 'warmup' ? 'var(--orange)' : 'var(--indigo)'}
+        title={item.name} subtitle={[item.amount, item.note].filter(Boolean).join(' · ') || undefined}
+        accessory="chevron" onClick={() => mobilityItemSheet(kind, id, item)}>
+        {list.length > 1 && <div className="row" style={{ gap: 2 }}>
+          <button className="iconbtn" onClick={ev => { ev.stopPropagation(); move(i, i - 1) }} disabled={i === 0} aria-label={t('Move up')}><Icon name="chevronUp" /></button>
+          <button className="iconbtn" onClick={ev => { ev.stopPropagation(); move(i, i + 1) }} disabled={i === list.length - 1} aria-label={t('Move down')}><Icon name="chevronDown" /></button>
+        </div>}
+      </Row>
+    ))}
+    <Row icon="plus" iconTint="var(--acc)"
+      title={kind === 'warmup' ? t('Add warm-up item') : t('Add cool-down item')}
+      accessory="chevron" onClick={() => mobilityItemSheet(kind, id, null)} />
   </div>
 }
